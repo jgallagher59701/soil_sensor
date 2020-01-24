@@ -1,0 +1,3 @@
+[submodule "lib/FabioCuomo-DS3231"]
+	path = lib/FabioCuomo-DS3231
+	url = https://github.com/jgallagher59701/FabioCuomo-DS3231
