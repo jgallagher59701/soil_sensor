@@ -42,7 +42,7 @@
 #define AREF_VOLTAGE_X1000 1080L    // Used to get battery voltage in get_bandgap()
 #define FORCE_CLOCK_RESET 0
 
-#define DS3231_CLOCK_ADR 0x38
+// #define DS3231_CLOCK_ADR 0x38
 #define SOIL_SENSOR_ADDR 0x36
 
 // Tx should not use the Serial interface except for debugging
@@ -320,7 +320,7 @@ void clock_setup(bool initial_call) {
     // Check the 32kHz osc.
     if (RTC.getEN32kHz()) {
         IO(Serial.println(F("32kHz osc running")));
-        RTC.clearEN32kHz();
+        RTC.setEN32kHz(false);
         if (RTC.getEN32kHz()) {
             IO(Serial.println(F("32kHz osc still running... FAIL")));
             blink_times(STATUS, 20 /* Hz */, 0); // 20 Hz blink forever
@@ -504,7 +504,7 @@ uint16_t get_soil_moisture_value() {
     while (cap_value != new_cap_value) {
         LowPower.powerDown(SLEEP_1S, ADC_OFF, BOD_OFF);
         cap_value = new_cap_value;
-        uint16_t new_cap_value = soil_moisture.touchRead(0);
+        new_cap_value = soil_moisture.touchRead(0);
     }
 
     return cap_value;
