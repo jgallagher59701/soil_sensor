@@ -23,11 +23,19 @@ If you clone without '--recursive' then use:
 
 After a plain clone.
 
+Then, init the _platformio_ environment using:
+
+  pio init --ide clion
+
 ## Building
 
 This software can be built using platformio, both the command line and
 CLion IDE are supported; using another IDE should be simple. It is
 based on the Arduino pro mini.
+
+Build using the CLion ide or on the command line using:
+
+  pio run
 
 ## Dependencies
 
