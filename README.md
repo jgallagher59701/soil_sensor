@@ -39,9 +39,14 @@ Build using the CLion ide or on the command line using:
 
 ## Dependencies
 
-LowPower - Low-Power_ID38 - platformio lib install 38
-SeeSaw - Adafruit seesaw Library_ID1890	- ... install 1890
-RadioHead - RadioHead_ID124 - ... install 124
+* LowPower - Low-Power_ID38 - platformio lib install 38
+* RTClibExtended_ID6170 - ... install 6170 _But see the code in 'lib' here. Use that instead._
+* SeeSaw - Adafruit seesaw Library_ID1890	- ... install 1890
+* RadioHead - RadioHead_ID124 - ... install 124
+
+## PlatformIO information
+
+https://docs.platformio.org/en/latest/ide/vscode.html#quick-start
 
 ## Keywords
 

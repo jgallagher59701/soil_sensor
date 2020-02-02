@@ -25,9 +25,13 @@
 // Look in Documents/Arduino/libraries 
 #include <Adafruit_seesaw.h>
 
+#include "blink.h"
+
 #define RFM95_INT 3
 #define RFM95_CS 5
 #define RFM95_RST 6
+
+#define DEVICE_POWER 10
 
 #define CLOCK_BAT_VOLTAGE A0
 #define TMP36 A1
@@ -79,8 +83,9 @@ Adafruit_seesaw soil_moisture;
 #define COMPLETED 1
 #define ERROR_OCCURRED 0
 
+#if 0
 // Blink N times, 1/4s on. Repeat M times. If M is 0, repeat forever.
-void blink_times(int pin, int N, int M) {
+void new_blink_times(int pin, int N, int M) {
 
 #define one_second 1000
 #define quarter_second 250
@@ -100,6 +105,42 @@ void blink_times(int pin, int N, int M) {
         //LowPower.powerDown(SLEEP_1S, ADC_OFF, BOD_OFF);
     }
 }
+
+// Blink N times, 1/4s on/off. Repeat M times. If M is 0, repeat forever.
+/**
+ * @brief One Second on, 1/4s off/on for N times. Repeat M times
+ *
+ * Signal various states, including errors. The long (1s) one period makes
+ * it easier to recognize the following set of flashes, which can be varied
+ * in number to indicate various conditions. Use 2-3 cycles to indicate
+ * various initialization operations and infinite cycles to indicate an error.
+ *
+ * @param pin Toggle the state of this pin
+ * @param N One cycle should flash this many times
+ * @param M Number of cycles. If 0, cycle forever
+ */
+void new_blink_times(int pin, int N, int M) {
+
+#define one_second 1000
+#define quarter_second 250
+
+    int count = 0;
+    while ((M == 0) ? 1 : count < M) {
+        count++;
+        for (int i = 0; i < N; ++i) {
+            digitalWrite(pin, HIGH);
+            delay(quarter_second);
+            // LowPower.powerDown(SLEEP_250MS, ADC_OFF, BOD_OFF);
+            digitalWrite(pin, LOW);
+            delay(quarter_second);
+            // LowPower.powerDown(SLEEP_250MS, ADC_OFF, BOD_OFF);
+        }
+        delay(one_second);
+        //LowPower.powerDown(SLEEP_1S, ADC_OFF, BOD_OFF);
+    }
+}
+
+#endif
 
 // Function created to obtain chip's actual Vcc voltage value, using internal bandgap reference
 // This demonstrates ability to read processors Vcc voltage and the ability to maintain A/D calibration with changing Vcc
@@ -213,7 +254,7 @@ void port_setup() {
 // If an error is detected, this function does not return.
 void lora_setup() {
     // LED to show the LORA radio has been configured - turn on once the LORA is setup
-    blink_times(STATUS, LORA_STATUS, START);
+    new_blink_times(STATUS, LORA_STATUS, START);
 
     digitalWrite(RFM95_CS, LOW);
 
@@ -230,14 +271,14 @@ void lora_setup() {
     // 10Hz
     while (!rf95.init()) {
         IO(Serial.println(F("LoRa radio init failed")));
-        blink_times(STATUS, LORA_STATUS, ERROR_OCCURRED); //
+        new_blink_times(STATUS, LORA_STATUS, ERROR_OCCURRED); //
     }
 
     // Defaults after init are 434.0MHz, modulation GFSK_Rb250Fd250, +13dbM.
     // If frequency set fails, blink at 2Hz forever.
     if (!rf95.setFrequency(RF95_FREQ)) {
         IO(Serial.println(F("setFrequency failed")));
-        blink_times(STATUS, LORA_STATUS, ERROR_OCCURRED);
+        new_blink_times(STATUS, LORA_STATUS, ERROR_OCCURRED);
     }
 
     IO(Serial.print(F("Set Freq to: ")));
@@ -261,20 +302,20 @@ void lora_setup() {
 
     // LORA setup success, status on.
     IO(Serial.println(F("LoRa radio init OK!")));
-    blink_times(STATUS, LORA_STATUS, COMPLETED);
+    new_blink_times(STATUS, LORA_STATUS, COMPLETED);
 }
 
 // Can be called both when the clock is first powered and when it's been running
 // by setting 'initial_call' to true or false.
 void clock_setup(bool initial_call) {
     if (initial_call) {
-        blink_times(STATUS, CLOCK_STATUS, START);
+        new_blink_times(STATUS, CLOCK_STATUS, START);
         // The DS3231 requires the Wire library
         Wire.begin();
 
         if (!RTC.begin()) {
             IO(Serial.println(F("Couldn't find RTC")));
-            blink_times(STATUS, CLOCK_STATUS, ERROR_OCCURRED);
+            error_blink_times(STATUS, CLOCK_STATUS + 1);
         }
 
         if (RTC.lostPower() || FORCE_CLOCK_RESET) {
@@ -284,7 +325,6 @@ void clock_setup(bool initial_call) {
             // This line sets the RTC with an explicit date & time, for example to set
             // January 21, 2014 at 3am you would call:
             // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
-            blink_times(STATUS, CLOCK_STATUS, ERROR_OCCURRED);
         }
     }
 
@@ -323,7 +363,7 @@ void clock_setup(bool initial_call) {
         RTC.setEN32kHz(false);
         if (RTC.getEN32kHz()) {
             IO(Serial.println(F("32kHz osc still running... FAIL")));
-            blink_times(STATUS, 20 /* Hz */, 0); // 20 Hz blink forever
+            error_blink_times(STATUS,  CLOCK_STATUS + 2);
         }
     }
 
@@ -332,25 +372,27 @@ void clock_setup(bool initial_call) {
     // RTC setup success, status on.
     IO(Serial.println(F("RTC init OK!")));
 
+    IO(Serial.flush());
+
     // Only show status on the initial call
     if (initial_call) {
-        blink_times(STATUS, CLOCK_STATUS, COMPLETED);
+        new_blink_times(STATUS, CLOCK_STATUS, COMPLETED);
     }
 }
 
 void soil_moisture_setup() {
     // Initialize the soil sensor
-    blink_times(STATUS, SOIL_MOISTURE_STATUS, START);
+    new_blink_times(STATUS, SOIL_MOISTURE_STATUS, START);
 
     if (!soil_moisture.begin(SOIL_SENSOR_ADDR)) {
         IO(Serial.println(F("ERROR! seesaw not found")));
-        blink_times(STATUS, SOIL_MOISTURE_STATUS, ERROR_OCCURRED);
+        new_blink_times(STATUS, SOIL_MOISTURE_STATUS, ERROR_OCCURRED);
     } else {
         IO(Serial.print(F("seesaw started! version: ")));
         IO(Serial.println(soil_moisture.getVersion(), HEX));
     }
 
-    blink_times(STATUS, SOIL_MOISTURE_STATUS, COMPLETED);
+    new_blink_times(STATUS, SOIL_MOISTURE_STATUS, COMPLETED);
 }
 
 void setup() {
@@ -360,6 +402,8 @@ void setup() {
     pinMode(A0, INPUT); // analog; DS3231 battery voltage
     pinMode(A1, INPUT); // analog; TMP36 temp sensor
 
+    pinMode(DEVICE_POWER, OUTPUT);
+
 #if DEBUG
     // Start the serial port
     while (!Serial);
@@ -367,11 +411,15 @@ void setup() {
     Serial.println(F("boot"));
 #endif
 
+    digitalWrite(DEVICE_POWER, HIGH);
+    
     clock_setup(true);
-
+    
+#if 0
     soil_moisture_setup();
 
     lora_setup();
+#endif
 }
 
 // Send basic information about the sensor plus the information in time_stamp, etc.
@@ -541,14 +589,28 @@ uint16_t get_clock_bat_volatage(uint16_t v_bat) {
 }
 
 void loop() {
-    blink_times(STATUS, SAMPLE_STATUS, START);
+    new_blink_times(STATUS, SAMPLE_STATUS, START);
 
+    digitalWrite(DEVICE_POWER, HIGH);
+    clock_setup(false);
+    
     uint16_t v_bat = get_bandgap();
 
+    IO(Serial.print(F("Battery: ")));
+    IO(Serial.println(v_bat));
+    IO(Serial.flush());
+
+    IO(Serial.print(F("Time: ")));
+    IO(Serial.println(iso8601_date_time(RTC.now())));
+    IO(Serial.flush());
+    
+#if 0
     send_packet(iso8601_date_time(RTC.now()), (uint16_t) (RTC.getTemp() * 100), get_clock_bat_volatage(v_bat), v_bat,
                 get_tmp36_temp(v_bat), get_soil_moisture_value());
+#endif
+    new_blink_times(STATUS, SAMPLE_STATUS, COMPLETED);
 
-    blink_times(STATUS, SAMPLE_STATUS, COMPLETED);
-
+    digitalWrite(DEVICE_POWER, LOW);
+    
     LowPower.powerDown(SLEEP_1S, ADC_OFF, BOD_OFF);
 }
