@@ -494,11 +494,11 @@ void send_packet(char *time_stamp, uint16_t clock_temp, uint16_t clock_bat_volts
  *
  * The DS3231 will trigger an interrupt (signalled by a tranision to the LOW
  * state) on interrupt 0 of the Atmega 328.
- * 
+ *
  * @param minutes Trigger an alarm when the minutes match this time unless
  * the value passed is -1, in which case trigger an alarm every minute
- * @param seconds Trigger an alarm when the seconds (and optionally) the 
- * minutes match this time. 
+ * @param seconds Trigger an alarm when the seconds (and optionally) the
+ * minutes match this time.
  */
 void set_alarm(int minutes, int seconds) {
     // setAlarm(Ds3231_ALARM_TYPES_t alarmType, byte seconds, byte minutes, byte hours, byte daydate);
@@ -512,7 +512,7 @@ void set_alarm(int minutes, int seconds) {
         // Set alarm every hour at the given minute and second marks
         RTC.setAlarm(ALM1_MATCH_MINUTES, seconds, minutes, 0, 0);
     }
-    
+
     RTC.armAlarm(1, true);
     RTC.alarmInterrupt(1, true);
 
@@ -616,9 +616,6 @@ void setup() {
 void loop() {
     new_blink_times(STATUS, SAMPLE_STATUS, START);
 
-    digitalWrite(DEVICE_POWER, HIGH);
-    clock_setup(false);
-
     uint16_t v_bat = get_bandgap();
 
     IO(Serial.print(F("Battery: ")));
@@ -635,12 +632,16 @@ void loop() {
 #endif
     new_blink_times(STATUS, SAMPLE_STATUS, COMPLETED);
 
-
     set_alarm(1, 0);
 
-    attachInterrupt(0, wakeUp, LOW);                       //use interrupt 0 (pin 2) and run function wakeUp when pin 2 gets LOW
+    attachInterrupt(0, wakeUp, LOW);    //use interrupt 0 (pin 2) and run function wakeUp when pin 2 gets LOW
 
     digitalWrite(DEVICE_POWER, LOW);
 
-    LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);   //arduino enters sleep mode here
+    //arduino enters sleep mode here
+    LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
+
+    // wake up here.
+    digitalWrite(DEVICE_POWER, HIGH);
+    clock_setup(false);
 }
