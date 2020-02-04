@@ -311,14 +311,20 @@ void clock_setup(bool initial_call) {
     if (initial_call) {
         new_blink_times(STATUS, CLOCK_STATUS, START);
         // The DS3231 requires the Wire library
-        Wire.begin();
+        // Wire.begin(); RTC_DS3231::begin starts Wire()
 
         if (!RTC.begin()) {
             IO(Serial.println(F("Couldn't find RTC")));
             error_blink_times(STATUS, CLOCK_STATUS + 1);
         }
 
-        if (RTC.lostPower() || FORCE_CLOCK_RESET) {
+        // print the control and status register once begin() runs or ... see below.
+        IO(Serial.print(F("RTC read(DS3231_CONTROL) inside initial configure: ")));
+        IO(Serial.println(RTC.read(DS3231_CONTROL), HEX));
+        IO(Serial.print(F("RTC read(DS3231_STATUSREG) inside initial configure: ")));
+        IO(Serial.println(RTC.read(DS3231_STATUSREG), HEX));
+
+        if (RTC.lostPower()) {
             IO(Serial.println(F("RTC lost power, lets set the time!")));
             // following line sets the RTC to the date & time this sketch was compiled
             RTC.adjust(DateTime(F(__DATE__), F(__TIME__)));
@@ -327,7 +333,14 @@ void clock_setup(bool initial_call) {
             // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
         }
     }
-
+    else {
+        // Print the control and status register first thing once initialized.
+        IO(Serial.print(F("RTC read(DS3231_CONTROL) inside initial configure: ")));
+        IO(Serial.println(RTC.read(DS3231_CONTROL), HEX));
+        IO(Serial.print(F("RTC read(DS3231_STATUSREG) inside initial configure: ")));
+        IO(Serial.println(RTC.read(DS3231_STATUSREG), HEX));
+    }
+    
     //clear any pending alarms
     RTC.armAlarm(1, false);
     RTC.clearAlarm(1);
