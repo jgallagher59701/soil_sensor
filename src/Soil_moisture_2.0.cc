@@ -196,9 +196,9 @@ void port_setup() {
 
 // Configure the radio. If an error is detected, blink the status LED.
 // If an error is detected, this function does not return.
-void lora_setup() {
+void lora_setup(bool initial_call) {
     // LED to show the LORA radio has been configured - turn on once the LORA is setup
-    new_blink_times(STATUS, LORA_STATUS, START);
+    if (initial_call) new_blink_times(STATUS, LORA_STATUS, START);
 
     digitalWrite(RFM95_CS, LOW);
 
@@ -213,16 +213,17 @@ void lora_setup() {
     // Defaults for RFM95 after init are 434.0MHz, 13dBm, Bw = 125 kHz, Cr = 4/5,
     // Sf = 128chips/symbol, CRC on. If the init fails, LORA status LED blinks at
     // 10Hz
-    while (!rf95.init()) {
+    // This used 'while (!rf95.init()) ...' TODO Check if that is needed. jhrg 5/24/20
+    if (!rf95.init()) {
         IO(Serial.println(F("LoRa radio init failed")));
-        new_blink_times(STATUS, LORA_STATUS, ERROR_OCCURRED); //
+        //error_blink_times(STATUS, LORA_STATUS + 1);
     }
 
     // Defaults after init are 434.0MHz, modulation GFSK_Rb250Fd250, +13dbM.
     // If frequency set fails, blink at 2Hz forever.
     if (!rf95.setFrequency(RF95_FREQ)) {
         IO(Serial.println(F("setFrequency failed")));
-        new_blink_times(STATUS, LORA_STATUS, ERROR_OCCURRED);
+        error_blink_times(STATUS, LORA_STATUS + 2);
     }
 
     IO(Serial.print(F("Set Freq to: ")));
@@ -246,7 +247,7 @@ void lora_setup() {
 
     // LORA setup success, status on.
     IO(Serial.println(F("LoRa radio init OK!")));
-    new_blink_times(STATUS, LORA_STATUS, COMPLETED);
+    if (initial_call) new_blink_times(STATUS, LORA_STATUS, COMPLETED);
 }
 
 // Can be called both when the clock is first powered and when it's been running
@@ -276,6 +277,11 @@ void clock_setup(bool initial_call) {
             // January 21, 2014 at 3am you would call:
             // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
         }
+
+        // This code only uses alarm 1, so clear alarm 2 only once
+        RTC.armAlarm(2, false);
+        RTC.clearAlarm(2);
+        RTC.alarmInterrupt(2, false);
     }
     else {
         // Print the control and status register first thing once initialized.
@@ -289,18 +295,15 @@ void clock_setup(bool initial_call) {
     RTC.armAlarm(1, false);
     RTC.clearAlarm(1);
     RTC.alarmInterrupt(1, false);
-    RTC.armAlarm(2, false);
-    RTC.clearAlarm(2);
-    RTC.alarmInterrupt(2, false);
 
     // Set BBSQW (Battery Backup SQW) so that the alarm can generate
-    // an interrupt when batery powered. jhrg 3/8/19
+    // an interrupt when powered by a battery. jhrg 3/8/19
     // See https://forum.arduino.cc/index.php?topic=549372.0
     // NB: For this to work, it must be called before DS3231_OFF, since
     // that call sets INTCN. Any other call to writeSqwPinMode clears INTCN,
     // including the BBSQW call, and clearing INTCN disables interrupts.
 
-    // Set SQW oscillator to OFF when in battery mode (!ESOC)
+    // Set SQW oscillator to OFF, enabling interrupts
     RTC.writeSqwPinMode(DS3231_OFF);
     IO(Serial.print(F("RTC readSqwPinMode: ")));
     IO(Serial.println(RTC.readSqwPinMode(), HEX));
@@ -308,31 +311,21 @@ void clock_setup(bool initial_call) {
     IO(Serial.print(F("RTC read(DS3231_CONTROL): ")));
     IO(Serial.println(RTC.read(DS3231_CONTROL), HEX));
 
-    byte control_value = RTC.read(DS3231_CONTROL);
-    RTC.write(DS3231_CONTROL, control_value | DS3231_BBSQW);
+    byte ctrl_reg = RTC.setBBSQW(true);
+    IO(Serial.print(F("RTC read(DS3231_CONTROL) after setBBSQW(): ")));
+    IO(Serial.println(ctrl_reg, HEX));
 
-    IO(Serial.print(F("RTC read(DS3231_CONTROL) | BBSQW: ")));
-    IO(Serial.println(RTC.read(DS3231_CONTROL), HEX));
-
-    // Check the 32kHz osc.
+    // Turn off the 32kHz osc. which is onn by default at power up
+    (void) RTC.setEN32kHz(false);
+#ifdef DEBUG
     if (RTC.getEN32kHz()) {
         IO(Serial.println(F("32kHz osc running")));
-        byte status = RTC.setEN32kHz(false);
-        IO(Serial.println(F("Status register result: ")));
-        IO(Serial.println(status));
-#if 1
-        if (RTC.getEN32kHz()) {
-            IO(Serial.println(F("32kHz osc still running... FAIL")));
-            error_blink_times(STATUS,  CLOCK_STATUS + 2);
-        }
-#endif
+        error_blink_times(STATUS,  CLOCK_STATUS + 2);
     }
-
-    IO(Serial.println(F("32kHz osc not running")));
+#endif
 
     // RTC setup success, status on.
     IO(Serial.println(F("RTC init OK!")));
-
     IO(Serial.flush());
 
     // Only show status on the initial call
@@ -536,7 +529,7 @@ void setup() {
     soil_moisture_setup();
 #endif
 
-    lora_setup();
+    lora_setup(true);
 }
 
 void loop() {
@@ -574,4 +567,5 @@ void loop() {
     // wake up here.
     digitalWrite(DEVICE_POWER, HIGH);
     clock_setup(false);
+    lora_setup(false);
 }
