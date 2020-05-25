@@ -16,14 +16,17 @@
 #include <Arduino.h>
 
 #include <Wire.h>
-#include "LowPower.h"
+#include <LowPower.h>
 
 #include <RH_RF95.h>
-// DS3231.h doesn't have TimeSpan, but might use less space
-#include <RTClibExtended.h>
+#include <RTClibExtended.h> // DS3231.h doesn't have TimeSpan, but might use less space
+
+#define STEMMA 0
+#if STEMMA
 // Might edit this and make a lib that has only what the soil sensor needs.
 // Look in Documents/Arduino/libraries 
 #include <Adafruit_seesaw.h>
+#endif
 
 #include "blink.h"
 
@@ -36,18 +39,16 @@
 #define CLOCK_BAT_VOLTAGE A0
 #define TMP36 A1
 
-// Was LED_BUILTIN
 // The status LED will only be used for errors in production code
 #define STATUS 9
 
 #define RF95_FREQ 915.0
 
-#define SENSOR_ID "1"   // Each slave sensor must ahve a unique ID
+#define SENSOR_ID "1"   // Each slave sensor must have a unique ID
 #define AREF_VOLTAGE_X1000 1080L    // Used to get battery voltage in get_bandgap()
 #define FORCE_CLOCK_RESET 0
 
 // #define DS3231_CLOCK_ADR 0x38
-#define SOIL_SENSOR_ADDR 0x36
 
 // Tx should not use the Serial interface except for debugging
 #define DEBUG 1
@@ -64,13 +65,15 @@ RH_RF95 rf95(RFM95_CS, RFM95_INT);
 // Singleton real time clock
 RTC_DS3231 RTC;
 
+#if STEMMA
 Adafruit_seesaw soil_moisture;
+#endif
 
 ///
 /// General functions
 ///
 
-// Blink 2, 3, ..., times to indicate different componenets starting.
+// Blink 2, 3, ..., times to indicate different components starting.
 // Blink twice at the start of initialization, once at the end, or
 // forever if an error occurs. The SAMPLE_STATUS and STARTED/COMPLETED
 // values are used only for testing
@@ -82,65 +85,6 @@ Adafruit_seesaw soil_moisture;
 #define START 1
 #define COMPLETED 1
 #define ERROR_OCCURRED 0
-
-#if 0
-// Blink N times, 1/4s on. Repeat M times. If M is 0, repeat forever.
-void new_blink_times(int pin, int N, int M) {
-
-#define one_second 1000
-#define quarter_second 250
-
-    int count = 0;
-    while ((M == 0) ? 1 : count < M) {
-        count++;
-        for (int i = 0; i < N; ++i) {
-            digitalWrite(pin, HIGH);
-            delay(quarter_second);
-            // LowPower.powerDown(SLEEP_250MS, ADC_OFF, BOD_OFF);
-            digitalWrite(pin, LOW);
-            delay(quarter_second);
-            // LowPower.powerDown(SLEEP_250MS, ADC_OFF, BOD_OFF);
-        }
-        delay(one_second);
-        //LowPower.powerDown(SLEEP_1S, ADC_OFF, BOD_OFF);
-    }
-}
-
-// Blink N times, 1/4s on/off. Repeat M times. If M is 0, repeat forever.
-/**
- * @brief One Second on, 1/4s off/on for N times. Repeat M times
- *
- * Signal various states, including errors. The long (1s) one period makes
- * it easier to recognize the following set of flashes, which can be varied
- * in number to indicate various conditions. Use 2-3 cycles to indicate
- * various initialization operations and infinite cycles to indicate an error.
- *
- * @param pin Toggle the state of this pin
- * @param N One cycle should flash this many times
- * @param M Number of cycles. If 0, cycle forever
- */
-void new_blink_times(int pin, int N, int M) {
-
-#define one_second 1000
-#define quarter_second 250
-
-    int count = 0;
-    while ((M == 0) ? 1 : count < M) {
-        count++;
-        for (int i = 0; i < N; ++i) {
-            digitalWrite(pin, HIGH);
-            delay(quarter_second);
-            // LowPower.powerDown(SLEEP_250MS, ADC_OFF, BOD_OFF);
-            digitalWrite(pin, LOW);
-            delay(quarter_second);
-            // LowPower.powerDown(SLEEP_250MS, ADC_OFF, BOD_OFF);
-        }
-        delay(one_second);
-        //LowPower.powerDown(SLEEP_1S, ADC_OFF, BOD_OFF);
-    }
-}
-
-#endif
 
 // Function created to obtain chip's actual Vcc voltage value, using internal bandgap reference
 // This demonstrates ability to read processors Vcc voltage and the ability to maintain A/D calibration with changing Vcc
@@ -335,9 +279,9 @@ void clock_setup(bool initial_call) {
     }
     else {
         // Print the control and status register first thing once initialized.
-        IO(Serial.print(F("RTC read(DS3231_CONTROL) inside initial configure: ")));
+        IO(Serial.print(F("RTC read(DS3231_CONTROL): ")));
         IO(Serial.println(RTC.read(DS3231_CONTROL), HEX));
-        IO(Serial.print(F("RTC read(DS3231_STATUSREG) inside initial configure: ")));
+        IO(Serial.print(F("RTC read(DS3231_STATUSREG): ")));
         IO(Serial.println(RTC.read(DS3231_STATUSREG), HEX));
     }
     
@@ -358,26 +302,30 @@ void clock_setup(bool initial_call) {
 
     // Set SQW oscillator to OFF when in battery mode (!ESOC)
     RTC.writeSqwPinMode(DS3231_OFF);
-    IO(Serial.print(F("RTC readSqwPinMode inside configure: ")));
+    IO(Serial.print(F("RTC readSqwPinMode: ")));
     IO(Serial.println(RTC.readSqwPinMode(), HEX));
 
-    IO(Serial.print(F("RTC read(DS3231_CONTROL) inside configure: ")));
+    IO(Serial.print(F("RTC read(DS3231_CONTROL): ")));
     IO(Serial.println(RTC.read(DS3231_CONTROL), HEX));
 
     byte control_value = RTC.read(DS3231_CONTROL);
     RTC.write(DS3231_CONTROL, control_value | DS3231_BBSQW);
 
-    IO(Serial.print(F("RTC read(DS3231_CONTROL) inside configure: ")));
+    IO(Serial.print(F("RTC read(DS3231_CONTROL) | BBSQW: ")));
     IO(Serial.println(RTC.read(DS3231_CONTROL), HEX));
 
     // Check the 32kHz osc.
     if (RTC.getEN32kHz()) {
         IO(Serial.println(F("32kHz osc running")));
-        RTC.setEN32kHz(false);
+        byte status = RTC.setEN32kHz(false);
+        IO(Serial.println(F("Status register result: ")));
+        IO(Serial.println(status));
+#if 1
         if (RTC.getEN32kHz()) {
             IO(Serial.println(F("32kHz osc still running... FAIL")));
             error_blink_times(STATUS,  CLOCK_STATUS + 2);
         }
+#endif
     }
 
     IO(Serial.println(F("32kHz osc not running")));
@@ -392,22 +340,6 @@ void clock_setup(bool initial_call) {
         new_blink_times(STATUS, CLOCK_STATUS, COMPLETED);
     }
 }
-
-void soil_moisture_setup() {
-    // Initialize the soil sensor
-    new_blink_times(STATUS, SOIL_MOISTURE_STATUS, START);
-
-    if (!soil_moisture.begin(SOIL_SENSOR_ADDR)) {
-        IO(Serial.println(F("ERROR! seesaw not found")));
-        new_blink_times(STATUS, SOIL_MOISTURE_STATUS, ERROR_OCCURRED);
-    } else {
-        IO(Serial.print(F("seesaw started! version: ")));
-        IO(Serial.println(soil_moisture.getVersion(), HEX));
-    }
-
-    new_blink_times(STATUS, SOIL_MOISTURE_STATUS, COMPLETED);
-}
-
 
 // Send basic information about the sensor plus the information in time_stamp, etc.
 // Wait for a response and record the SNR and RSSI of the response (used in the
@@ -541,25 +473,6 @@ void set_alarm(int minutes, int seconds) {
     IO(Serial.flush());
 }
 
-// Return the temperature of the soil moisture sensor. Not very precise (+/- 1C)
-float get_soil_moisture_temp() {
-    return soil_moisture.getTemp();
-}
-
-// The value of the seesaw capacitive touch pin. An integer between 0 and 1023
-// This waits for the sensor to stabilize.
-uint16_t get_soil_moisture_value() {
-    uint16_t cap_value = 0xFFFF;
-    uint16_t new_cap_value = soil_moisture.touchRead(0);
-
-    while (cap_value != new_cap_value) {
-        LowPower.powerDown(SLEEP_1S, ADC_OFF, BOD_OFF);
-        cap_value = new_cap_value;
-        new_cap_value = soil_moisture.touchRead(0);
-    }
-
-    return cap_value;
-}
 
 // Return the TMP36 temperature, as an int16 scaled by 100
 // i.e., 19.0 C --> 190
@@ -587,7 +500,7 @@ int16_t get_tmp36_temp(uint16_t v_bat) {
     return (int16_t) ((analogRead(TMP36) / 1023.0) * (v_bat * 10)) - ZERO_CROSSING;
 }
 
-uint16_t get_clock_bat_volatage(uint16_t v_bat) {
+uint16_t get_clock_bat_voltage(uint16_t v_bat) {
     return (uint16_t) (analogRead(CLOCK_BAT_VOLTAGE) / 1023.0 * v_bat);
 }
 
@@ -619,11 +532,11 @@ void setup() {
 
     clock_setup(true);
 
-#if 0
+#if STEMMA
     soil_moisture_setup();
+#endif
 
     lora_setup();
-#endif
 }
 
 void loop() {
@@ -639,9 +552,13 @@ void loop() {
     IO(Serial.println(iso8601_date_time(RTC.now())));
     IO(Serial.flush());
 
-#if 0
-    send_packet(iso8601_date_time(RTC.now()), (uint16_t) (RTC.getTemp() * 100), get_clock_bat_volatage(v_bat), v_bat,
+#if STEMMA
+    send_packet(iso8601_date_time(RTC.now()), (uint16_t) (RTC.getTemp() * 100), get_clock_bat_voltage(v_bat), v_bat,
                 get_tmp36_temp(v_bat), get_soil_moisture_value());
+#else
+    // No STEMMA soil moisture sensor, use 256
+    send_packet(iso8601_date_time(RTC.now()), (uint16_t) (RTC.getTemp() * 100), get_clock_bat_voltage(v_bat), v_bat,
+                get_tmp36_temp(v_bat), 0x00FF);
 #endif
     new_blink_times(STATUS, SAMPLE_STATUS, COMPLETED);
 
