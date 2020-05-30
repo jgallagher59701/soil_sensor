@@ -17,9 +17,11 @@
 
 #include <Wire.h>
 #include <LowPower.h>
+#include <RTClibExtended.h> // DS3231.h doesn't have TimeSpan, but might use less space
+
+#define LORA 0
 
 #include <RH_RF95.h>
-#include <RTClibExtended.h> // DS3231.h doesn't have TimeSpan, but might use less space
 
 #define STEMMA 0
 #if STEMMA
@@ -34,6 +36,7 @@
 #define RFM95_CS 5
 #define RFM95_RST 6
 
+#define WAKE_INT 2 // INT0
 #define DEVICE_POWER 10
 
 #define CLOCK_BAT_VOLTAGE A0
@@ -42,6 +45,7 @@
 // The status LED will only be used for errors in production code
 #define STATUS 9
 
+#define RF95_TIMEOUT 4000
 #define RF95_FREQ 915.0
 
 #define SENSOR_ID "1"   // Each slave sensor must have a unique ID
@@ -59,15 +63,14 @@
 #define IO(x)
 #endif
 
-// Singleton instance of the radio driver
-RH_RF95 rf95(RFM95_CS, RFM95_INT);
-
 // Singleton real time clock
 RTC_DS3231 RTC;
 
 #if STEMMA
 Adafruit_seesaw soil_moisture;
 #endif
+
+RH_RF95 rf95(RFM95_CS, RFM95_INT);
 
 ///
 /// General functions
@@ -164,7 +167,7 @@ void port_setup() {
     // peripherals I am not using.
 
     // Disable the ADC by setting the ADEN bit (bit 7)  of the
-    // ADCSRA register to zero.
+    // ADCSRA register to zero.`
     // ADCSRA = ADCSRA & B01111111;
 
     // Disable the analog comparator by setting the ACD bit
@@ -395,13 +398,13 @@ void send_packet(char *time_stamp, uint16_t clock_temp, uint16_t clock_bat_volts
     // Now wait for a reply
     IO(Serial.println(F("Waiting for packet to complete...")));
 
-    rf95.waitPacketSent();
+    rf95.waitPacketSent(RF95_TIMEOUT);
     uint8_t buf[64 /*RH_RF95_MAX_MESSAGE_LEN*/];
     uint8_t len = sizeof(buf);
 
     IO(Serial.println(F("Waiting for reply...")));
 
-    if (rf95.waitAvailableTimeout(1000)) {
+    if (rf95.waitAvailableTimeout(RF95_TIMEOUT)) {
         // Should be a reply message for us now
         if (rf95.recv(buf, &len)) {
             // Update rssi and snr
@@ -507,12 +510,13 @@ void wakeUp()
 }
 
 void setup() {
-    port_setup();
+    //port_setup();
 
-    pinMode(STATUS, OUTPUT);  // The LED status indicator
     pinMode(A0, INPUT); // analog; DS3231 battery voltage
     pinMode(A1, INPUT); // analog; TMP36 temp sensor
+    pinMode(WAKE_INT, INPUT);   // use an external 100k pull up
 
+    pinMode(STATUS, OUTPUT);  // The LED status indicator
     pinMode(DEVICE_POWER, OUTPUT);
 
 #if DEBUG
@@ -529,8 +533,9 @@ void setup() {
 #if STEMMA
     soil_moisture_setup();
 #endif
-
+#if LORA
     lora_setup(true);
+#endif
 }
 
 void loop() {
@@ -546,6 +551,7 @@ void loop() {
     IO(Serial.println(iso8601_date_time(RTC.now())));
     IO(Serial.flush());
 
+#if LORA
 #if STEMMA
     send_packet(iso8601_date_time(RTC.now()), (uint16_t) (RTC.getTemp() * 100), get_clock_bat_voltage(v_bat), v_bat,
                 get_tmp36_temp(v_bat), get_soil_moisture_value());
@@ -554,9 +560,11 @@ void loop() {
     send_packet(iso8601_date_time(RTC.now()), (uint16_t) (RTC.getTemp() * 100), get_clock_bat_voltage(v_bat), v_bat,
                 get_tmp36_temp(v_bat), 0x00FF);
 #endif
+#endif
+
     new_blink_times(STATUS, SAMPLE_STATUS, COMPLETED);
 
-    set_alarm(1, 0);
+    set_alarm(-1, 15);
 
     attachInterrupt(0, wakeUp, LOW);    //use interrupt 0 (pin 2) and run function wakeUp when pin 2 gets LOW
 
@@ -568,5 +576,7 @@ void loop() {
     // wake up here.
     digitalWrite(DEVICE_POWER, HIGH);
     clock_setup(false);
+#if LORA
     lora_setup(false);
+#endif
 }
