@@ -258,7 +258,7 @@ void lora_setup(bool initial_call) {
     rf95.setSignalBandwidth(125000);
 
     // Setup Coding Rate:5(4/5),6(4/6),7(4/7),8(4/8) (higher == better error correction)
-    rf95.setCodingRate4(8);
+    rf95.setCodingRate4(5);
 
     // The default transmitter power is 13dBm, using PA_BOOST.
     // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then
