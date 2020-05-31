@@ -19,7 +19,7 @@
 #include <LowPower.h>
 #include <RTClibExtended.h> // DS3231.h doesn't have TimeSpan, but might use less space
 
-#define LORA 0
+#define LORA 1
 
 #include <RH_RF95.h>
 
@@ -158,6 +158,26 @@ char *iso8601_date_time(DateTime t) {
 /// Set up functions. Configure the MCU or a peripheral
 ///
 
+// Configure I/O ports to use less power while awake.
+// We use an external pullup on port 2
+void port_setup_wake() {
+    // PORTD Sets the read/write state. Inputs that are set to Read have the pull-up
+    // resistor disabled. This uses less power in sleep mode.
+    PORTD = PORTD | B11111000;
+    PORTB = PORTB | B00111111;
+
+}
+
+// Configure I/O ports to use less power during sleep.
+// We use and external pullup on the interrupt pin (pin 2).
+void port_setup_sleep() {
+    // PORTD Sets the read/write state. Inputs that are set to Read have the pull-up
+    // resistor disabled. This uses less power in sleep mode.
+    PORTD = PORTD | B00000000;
+    PORTB = PORTB | B00000000;
+
+}
+
 // Configure I/O ports so that by default they are in a low-power state.
 // other initialization code will set up the ports that are used as
 // needed.
@@ -176,8 +196,6 @@ void port_setup() {
 
     // Disable digital input buffers on all analog input pins
     // by setting bits 0-5 of the DIDR0 register to one.
-    // Of course, only do this if you are not using the analog
-    // inputs for your project.
     // NB: DIDR == Digital Input Disable Register
     DIDR0 = DIDR0 | B00111111;
 
@@ -192,13 +210,11 @@ void port_setup() {
     //DDRB pins 8 - 13
     DDRB = DDRB & B11000000;  // 8 - 13 as inputs; two high bits are not used
 
-    // PORTD Sets the read/write state. Inputs that are set to Write have the pull-up
-    // resistor enabled
-    PORTD = PORTD | B11111100;
-    PORTB = PORTB | B00111111;
+    port_setup_wake();
 }
 
-// Configure the radio. If an error is detected, blink the status LED.
+// Configure the
+// radio. If an error is detected, blink the status LED.
 // If an error is detected, this function does not return.
 void lora_setup(bool initial_call) {
     // LED to show the LORA radio has been configured - turn on once the LORA is setup
@@ -564,17 +580,16 @@ void loop() {
 
     new_blink_times(STATUS, SAMPLE_STATUS, COMPLETED);
 
-    set_alarm(-1, 15);
-
-    attachInterrupt(0, wakeUp, LOW);    //use interrupt 0 (pin 2) and run function wakeUp when pin 2 gets LOW
-
-    digitalWrite(DEVICE_POWER, LOW);
-
     //arduino enters sleep mode here
+    set_alarm(-1, 15);
+    attachInterrupt(0, wakeUp, LOW);    //use interrupt 0 (pin 2) and run function wakeUp when pin 2 gets LOW
+    digitalWrite(DEVICE_POWER, LOW);
+    port_setup_sleep();
     LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
 
     // wake up here.
     digitalWrite(DEVICE_POWER, HIGH);
+    port_setup_wake();
     clock_setup(false);
 #if LORA
     lora_setup(false);
