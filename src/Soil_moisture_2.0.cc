@@ -526,7 +526,7 @@ void wakeUp()
 }
 
 void setup() {
-    //port_setup();
+    port_setup();
 
     pinMode(A0, INPUT); // analog; DS3231 battery voltage
     pinMode(A1, INPUT); // analog; TMP36 temp sensor
