@@ -35,14 +35,19 @@ uses the the Arduino pro mini.
 
 Build using the CLion ide or on the command line using:
 
-  pio run
+`pio run`
 
 ## Dependencies
 
-* LowPower - Low-Power_ID38 - platformio lib install 38
-* RTClibExtended_ID6170 - ... install 6170 _But see the code in 'lib' here. Use that instead._
-* SeeSaw - Adafruit seesaw Library_ID1890	- ... install 1890
-* RadioHead - RadioHead_ID124 - ... install 124
+* LowPower - Low-Power_ID38 - `platformio lib install 38` `pio lib install "Low-Power"`
+* RTClibExtended_ID6170 - `... install 6170` _But see the code in 'lib' here. Use that instead._
+* SeeSaw - Adafruit seesaw Library_ID1890	- `... install 1890` `pio lib install "Adafruit seesaw Library"`
+* RadioHead - RadioHead_ID124 - `... install 124` `pio lib install "RadioHead"`
+* SDFat - SD card library - `pio lib install "SdFat"`
+
+* RadioHead documentation: 
+* https://www.airspayce.com/mikem/arduino/RadioHead/classRH__RF95.html, 
+* https://www.airspayce.com/mikem/arduino/RadioHead/classRHReliableDatagram.html
 
 ## PlatformIO information
 

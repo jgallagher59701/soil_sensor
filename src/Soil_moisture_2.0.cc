@@ -15,62 +15,62 @@
 
 #include <Arduino.h>
 
-#include <Wire.h>
 #include <LowPower.h>
+// The RTC lib uses the Wire interface
 #include <RTClibExtended.h> // DS3231.h doesn't have TimeSpan, but might use less space
 
-#define LORA 1
-
+// These use the SPI interface
+#include <SdFat.h>
 #include <RH_RF95.h>
-
-#define STEMMA 0
-#if STEMMA
-// Might edit this and make a lib that has only what the soil sensor needs.
-// Look in Documents/Arduino/libraries 
-#include <Adafruit_seesaw.h>
-#endif
+#include <RHReliableDatagram.h>
 
 #include "blink.h"
 
-#define RFM95_INT 3
+#define LORA 1
+#define SLEEP 0
+#define DEBUG 1
+#define DEBUG2 0
+
+#include "debug.h"
+
+// Tx should not use the Serial interface except for debugging
+
+// Arduino pins
+#define WAKE_INT 2 // INT0
+
+#define RFM95_INT 3 // INT1
 #define RFM95_CS 5
 #define RFM95_RST 6
 
-#define WAKE_INT 2 // INT0
-#define DEVICE_POWER 10
+#define SD_CS 7
 
-#define CLOCK_BAT_VOLTAGE A0
+#define DEVICE_POWER 8
+#define STATUS 9    // The status LED will only be used for errors in production code
+
+#define SF_MOISTURE_SENSOR A0
 #define TMP36 A1
-
-// The status LED will only be used for errors in production code
-#define STATUS 9
 
 #define RF95_TIMEOUT 4000
 #define RF95_FREQ 915.0
 
-#define SENSOR_ID "1"   // Each slave sensor must have a unique ID
+#define SENSOR_ID 1   // Each slave sensor must have a unique ID
 #define AREF_VOLTAGE_X1000 1080L    // Used to get battery voltage in get_bandgap()
-#define FORCE_CLOCK_RESET 0
+#define FORCE_CLOCK_RESET 0     // Force the clock to reset its time
 
 // #define DS3231_CLOCK_ADR 0x38
-
-// Tx should not use the Serial interface except for debugging
-#define DEBUG 1
-
-#if DEBUG
-#define IO(x) do { x; } while (0)
-#else
-#define IO(x)
-#endif
-
 // Singleton real time clock
 RTC_DS3231 RTC;
+
+RH_RF95 rf95(RFM95_CS, RFM95_INT);
+// Class to manage message delivery and receipt, using the driver declared above
+// TODO Add this: RHReliableDatagram manager(rf95, SENSOR_ID);
+
+SdFat sd;
+SdFile myFile;
 
 #if STEMMA
 Adafruit_seesaw soil_moisture;
 #endif
-
-RH_RF95 rf95(RFM95_CS, RFM95_INT);
 
 ///
 /// General functions
@@ -87,7 +87,6 @@ RH_RF95 rf95(RFM95_CS, RFM95_INT);
 
 #define START 1
 #define COMPLETED 1
-#define ERROR_OCCURRED 0
 
 // Function created to obtain chip's actual Vcc voltage value, using internal bandgap reference
 // This demonstrates ability to read processors Vcc voltage and the ability to maintain A/D calibration with changing Vcc
@@ -160,12 +159,16 @@ char *iso8601_date_time(DateTime t) {
 
 // Configure I/O ports to use less power while awake.
 // We use an external pullup on port 2
+// A bit value of zero is INPUT, a value of one is output
 void port_setup_wake() {
     // PORTD Sets the read/write state. Inputs that are set to Read have the pull-up
     // resistor disabled. This uses less power in sleep mode.
-    PORTD = PORTD | B11111000;
-    PORTB = PORTB | B00111111;
+    PORTD = PORTD | B11111000; // bits 0 - 7 --> pins 0 - 7
+    PORTB = PORTB | B00111111; // bits 0 - 5 --> pins 8 - 13
 
+    // TODO SPI Bus?
+    digitalWrite(RFM95_CS, HIGH);
+    digitalWrite(SD_CS, HIGH);
 }
 
 // Configure I/O ports to use less power during sleep.
@@ -173,9 +176,10 @@ void port_setup_wake() {
 void port_setup_sleep() {
     // PORTD Sets the read/write state. Inputs that are set to Read have the pull-up
     // resistor disabled. This uses less power in sleep mode.
-    PORTD = PORTD | B00000000;
-    PORTB = PORTB | B00000000;
+    PORTD = PORTD | B00000000; // pins 0 - 7
+    PORTB = PORTB | B00000000; // pins 8 - 13
 
+    // TODO SPI Bus?
 }
 
 // Configure I/O ports so that by default they are in a low-power state.
@@ -207,33 +211,26 @@ void port_setup() {
     // Also see: https://www.arduino.cc/en/Reference/PortManipulation
     // DDRD pins 0 - 7
     DDRD = DDRD & B00000011;  // 2 to 7 as inputs; leaves pins 0 & 1, which are RX & TX
-    //DDRB pins 8 - 13
+    // DDRB pins 8 - 13
     DDRB = DDRB & B11000000;  // 8 - 13 as inputs; two high bits are not used
 
     port_setup_wake();
 }
 
-// Configure the
-// radio. If an error is detected, blink the status LED.
+// Configure the radio. If an error is detected, blink the status LED.
 // If an error is detected, this function does not return.
-void lora_setup(bool initial_call) {
+void lora_setup(bool blink_status) {
     // LED to show the LORA radio has been configured - turn on once the LORA is setup
-    if (initial_call) new_blink_times(STATUS, LORA_STATUS, START);
-
-    digitalWrite(RFM95_CS, LOW);
+    if (blink_status) new_blink_times(STATUS, LORA_STATUS, START);
 
     // LORA manual reset
     digitalWrite(RFM95_RST, LOW);
-    //delay(10);
     LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);
     digitalWrite(RFM95_RST, HIGH);
-    //delay(10);
     LowPower.powerDown(SLEEP_15MS, ADC_OFF, BOD_OFF);
 
     // Defaults for RFM95 after init are 434.0MHz, 13dBm, Bw = 125 kHz, Cr = 4/5,
-    // Sf = 128chips/symbol, CRC on. If the init fails, LORA status LED blinks at
-    // 10Hz
-    // This used 'while (!rf95.init()) ...' TODO Check if that is needed. jhrg 5/24/20
+    // Sf = 128chips/symbol, CRC on.
     if (!rf95.init()) {
         IO(Serial.println(F("LoRa radio init failed")));
         //error_blink_times(STATUS, LORA_STATUS + 1);
@@ -245,9 +242,6 @@ void lora_setup(bool initial_call) {
         IO(Serial.println(F("setFrequency failed")));
         error_blink_times(STATUS, LORA_STATUS + 2);
     }
-
-    IO(Serial.print(F("Set Freq to: ")));
-    IO(Serial.println(RF95_FREQ));
 
     // None of these return error codes.
     // Setup Spreading Factor (chips/symbol) (n = 6 ~ 12, where Sf=2^n (eg 6 --> 2^6 == 64 chips/sym)
@@ -267,51 +261,17 @@ void lora_setup(bool initial_call) {
 
     // LORA setup success, status on.
     IO(Serial.println(F("LoRa radio init OK!")));
-    if (initial_call) new_blink_times(STATUS, LORA_STATUS, COMPLETED);
+    if (blink_status) new_blink_times(STATUS, LORA_STATUS, COMPLETED);
 }
 
 // Can be called both when the clock is first powered and when it's been running
-// by setting 'initial_call' to true or false.
-void clock_setup(bool initial_call) {
-    if (initial_call) {
+// by setting 'blink_status' to true or false.
+void clock_setup(bool blink_status)
+{
+    if (blink_status)
         new_blink_times(STATUS, CLOCK_STATUS, START);
-        // The DS3231 requires the Wire library
-        // Wire.begin(); RTC_DS3231::begin starts Wire()
 
-        if (!RTC.begin()) {
-            IO(Serial.println(F("Couldn't find RTC")));
-            error_blink_times(STATUS, CLOCK_STATUS + 1);
-        }
-
-        // print the control and status register once begin() runs or ... see below.
-        IO(Serial.print(F("RTC read(DS3231_CONTROL) inside initial configure: ")));
-        IO(Serial.println(RTC.read(DS3231_CONTROL), HEX));
-        IO(Serial.print(F("RTC read(DS3231_STATUSREG) inside initial configure: ")));
-        IO(Serial.println(RTC.read(DS3231_STATUSREG), HEX));
-
-        if (RTC.lostPower()) {
-            IO(Serial.println(F("RTC lost power, lets set the time!")));
-            // following line sets the RTC to the date & time this sketch was compiled
-            RTC.adjust(DateTime(F(__DATE__), F(__TIME__)));
-            // This line sets the RTC with an explicit date & time, for example to set
-            // January 21, 2014 at 3am you would call:
-            // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
-        }
-
-        // This code only uses alarm 1, so clear alarm 2 only once
-        RTC.armAlarm(2, false);
-        RTC.clearAlarm(2);
-        RTC.alarmInterrupt(2, false);
-    }
-    else {
-        // Print the control and status register first thing once initialized.
-        IO(Serial.print(F("RTC read(DS3231_CONTROL): ")));
-        IO(Serial.println(RTC.read(DS3231_CONTROL), HEX));
-        IO(Serial.print(F("RTC read(DS3231_STATUSREG): ")));
-        IO(Serial.println(RTC.read(DS3231_STATUSREG), HEX));
-    }
-    
-    //clear any pending alarms
+    // clear any pending alarms
     RTC.armAlarm(1, false);
     RTC.clearAlarm(1);
     RTC.alarmInterrupt(1, false);
@@ -325,18 +285,15 @@ void clock_setup(bool initial_call) {
 
     // Set SQW oscillator to OFF, enabling interrupts
     RTC.writeSqwPinMode(DS3231_OFF);
-    IO(Serial.print(F("RTC readSqwPinMode: ")));
-    IO(Serial.println(RTC.readSqwPinMode(), HEX));
 
-    IO(Serial.print(F("RTC read(DS3231_CONTROL): ")));
-    IO(Serial.println(RTC.read(DS3231_CONTROL), HEX));
+    IO2(Serial.print(F("RTC read(DS3231_CONTROL): ")));
+    IO2(Serial.println(RTC.read(DS3231_CONTROL), HEX));
 
+    // Enable interrupts while on battery power
     byte ctrl_reg = RTC.setBBSQW(true);
     IO(Serial.print(F("RTC read(DS3231_CONTROL) after setBBSQW(): ")));
     IO(Serial.println(ctrl_reg, HEX));
 
-    // Turn off the 32kHz osc. which is onn by default at power up
-    (void) RTC.setEN32kHz(false);
 #ifdef DEBUG
     if (RTC.getEN32kHz()) {
         IO(Serial.println(F("32kHz osc running")));
@@ -349,9 +306,8 @@ void clock_setup(bool initial_call) {
     IO(Serial.flush());
 
     // Only show status on the initial call
-    if (initial_call) {
+    if (blink_status)
         new_blink_times(STATUS, CLOCK_STATUS, COMPLETED);
-    }
 }
 
 // Send basic information about the sensor plus the information in time_stamp, etc.
@@ -363,11 +319,20 @@ void clock_setup(bool initial_call) {
 // Packet sent: Time, sensor ID, packet num, sensor battery volts, clock temp, clock battery volts, 
 //              rssi of last ack, snr of last ack, soil temp, soil moisture
 
-void send_packet(char *time_stamp, uint16_t clock_temp, uint16_t clock_bat_volts, uint16_t sensor_bat_volts,
+//send_packet(iso8601_date_time(RTC.now()), (uint16_t) (RTC.getTemp() * 100), v_bat,
+//        get_tmp36_temp(v_bat), get_moisture_raw(v_bat));
+
+void send_packet(char *time_stamp, uint16_t clock_temp, uint16_t sensor_bat_volts,
                  int16_t soil_temp, uint16_t soil_moisture) {
     static uint32_t packetnum = 0;  // packet counter, we increment per xmission
     static int16_t rssi = 0;        // rssi and snr are read from the ACK received and sent as part of the next packaet
     static int32_t snr = 0;
+
+    digitalWrite(RFM95_CS, LOW);
+    digitalWrite(SD_CS,HIGH);
+    SPI.begin();
+
+    lora_setup(false);
 
     IO(Serial.println(F("Sending to rf95_server")));
 
@@ -383,7 +348,7 @@ void send_packet(char *time_stamp, uint16_t clock_temp, uint16_t clock_bat_volts
     strncpy(packet, time_stamp, sizeof(packet) - 1);  // 19
     strncat(packet, ",", sizeof(packet) - 1);
 
-    strncat(packet, SENSOR_ID, sizeof(packet) - 1); // 1 - 4
+    strncat(packet, itoa(SENSOR_ID, val, 10), sizeof(packet) - 1); // 1 - 4
     strncat(packet, ",", sizeof(packet) - 1);
 
     strncat(packet, itoa(++packetnum, val, 10), sizeof(packet) - 1); // 5+
@@ -393,9 +358,6 @@ void send_packet(char *time_stamp, uint16_t clock_temp, uint16_t clock_bat_volts
     strncat(packet, ",", sizeof(packet) - 1);
 
     strncat(packet, itoa(clock_temp, val, 10), sizeof(packet) - 1);
-    strncat(packet, ",", sizeof(packet) - 1);
-
-    strncat(packet, itoa(clock_bat_volts, val, 10), sizeof(packet) - 1);
     strncat(packet, ",", sizeof(packet) - 1);
 
     strncat(packet, itoa(rssi, val, 10), sizeof(packet) - 1); // 6
@@ -445,6 +407,9 @@ void send_packet(char *time_stamp, uint16_t clock_temp, uint16_t clock_bat_volts
         IO(Serial.println(F("No reply, is there a listener around?")));
         IO(Serial.flush());
     }
+
+    digitalWrite(RFM95_CS, HIGH);
+    SPI.end();
 }
 
 /**
@@ -513,8 +478,8 @@ int16_t get_tmp36_temp(uint16_t v_bat) {
     return (int16_t) ((analogRead(TMP36) / 1023.0) * (v_bat * 10)) - ZERO_CROSSING;
 }
 
-uint16_t get_clock_bat_voltage(uint16_t v_bat) {
-    return (uint16_t) (analogRead(CLOCK_BAT_VOLTAGE) / 1023.0 * v_bat);
+uint16_t get_moisture_raw(uint16_t v_bat) {
+    return (uint16_t) (analogRead(SF_MOISTURE_SENSOR) / 1023.0 * v_bat);
 }
 
 /**
@@ -544,14 +509,39 @@ void setup() {
 
     digitalWrite(DEVICE_POWER, HIGH);
 
+    if (!RTC.begin()) {
+        IO(Serial.println(F("Couldn't find RTC")));
+        error_blink_times(STATUS, CLOCK_STATUS + 1);
+    }
+
+    // print the control and status register once begin() runs
+    IO(Serial.print(F("RTC read(DS3231_CONTROL) inside initial configure: ")));
+    IO(Serial.println(RTC.read(DS3231_CONTROL), HEX));
+    IO(Serial.print(F("RTC read(DS3231_STATUSREG) inside initial configure: ")));
+    IO(Serial.println(RTC.read(DS3231_STATUSREG), HEX));
+
+    if (RTC.lostPower()) {
+        IO(Serial.println(F("RTC lost power, lets set the time!")));
+        // following line sets the RTC to the date & time this sketch was compiled
+        RTC.adjust(DateTime(F(__DATE__), F(__TIME__)));
+        // This line sets the RTC with an explicit date & time, for example to set
+        // January 21, 2014 at 3am you would call:
+        // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+    }
+
+    // Turn off the 32kHz osc. which is on by default at power up
+    (void) RTC.setEN32kHz(false);
+
+    // This code only uses alarm 1, so clear alarm 2 only once
+    RTC.armAlarm(2, false);
+    RTC.clearAlarm(2);
+    RTC.alarmInterrupt(2, false);
+
     clock_setup(true);
 
-#if STEMMA
-    soil_moisture_setup();
-#endif
-#if LORA
-    lora_setup(true);
-#endif
+    // Set these HIGH so the SPI devices will be high impedance.
+    digitalWrite(RFM95_CS, HIGH);
+    digitalWrite(SD_CS,HIGH);
 }
 
 void loop() {
@@ -568,19 +558,14 @@ void loop() {
     IO(Serial.flush());
 
 #if LORA
-#if STEMMA
-    send_packet(iso8601_date_time(RTC.now()), (uint16_t) (RTC.getTemp() * 100), get_clock_bat_voltage(v_bat), v_bat,
-                get_tmp36_temp(v_bat), get_soil_moisture_value());
-#else
-    // No STEMMA soil moisture sensor, use 256
-    send_packet(iso8601_date_time(RTC.now()), (uint16_t) (RTC.getTemp() * 100), get_clock_bat_voltage(v_bat), v_bat,
-                get_tmp36_temp(v_bat), 0x00FF);
-#endif
+    send_packet(iso8601_date_time(RTC.now()), (uint16_t) (RTC.getTemp() * 100), v_bat,
+            get_tmp36_temp(v_bat), get_moisture_raw(v_bat));
 #endif
 
     new_blink_times(STATUS, SAMPLE_STATUS, COMPLETED);
 
-    // Arduino enters sleep mode here
+#if SLEEP
+    // Arduino enters sleep mode here; minutes == -1 means every minute
     set_alarm(-1, 15);
     attachInterrupt(0, wakeUp, LOW);    //use interrupt 0 (pin 2) and run function wakeUp when pin 2 gets LOW
     // Power save: Turn off the SPI bus (SPI.end())
@@ -590,12 +575,12 @@ void loop() {
     digitalWrite(DEVICE_POWER, LOW);
     port_setup_sleep(); // Power save: turn off internal pull ups
     LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
-
+#else
+    digitalWrite(DEVICE_POWER, LOW);
+    port_setup_sleep(); // Power save: turn off internal pull ups
+#endif
     // wake up here.
     digitalWrite(DEVICE_POWER, HIGH);
     port_setup_wake();
     clock_setup(false);
-#if LORA
-    lora_setup(false);
-#endif
 }
