@@ -27,7 +27,7 @@
 #include "blink.h"
 
 #define LORA 1
-#define SLEEP 0
+#define SLEEP 1
 #define DEBUG 1
 #define DEBUG2 0
 
@@ -507,8 +507,6 @@ void setup() {
     Serial.println(F("boot"));
 #endif
 
-    digitalWrite(DEVICE_POWER, HIGH);
-
     if (!RTC.begin()) {
         IO(Serial.println(F("Couldn't find RTC")));
         error_blink_times(STATUS, CLOCK_STATUS + 1);
@@ -538,6 +536,8 @@ void setup() {
     RTC.alarmInterrupt(2, false);
 
     clock_setup(true);
+
+    digitalWrite(DEVICE_POWER, HIGH);
 
     // Set these HIGH so the SPI devices will be high impedance.
     digitalWrite(RFM95_CS, HIGH);
