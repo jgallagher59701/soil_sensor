@@ -27,6 +27,7 @@
 #include "blink.h"
 
 #define LORA 1
+#define SD 1
 #define SLEEP 1
 #define DEBUG 1
 #define DEBUG2 0
@@ -52,6 +53,7 @@
 
 #define RF95_TIMEOUT 4000
 #define RF95_FREQ 915.0
+#define MAX_PACKET_SIZE 64
 
 #define SENSOR_ID 1   // Each slave sensor must have a unique ID
 #define AREF_VOLTAGE_X1000 1080L    // Used to get battery voltage in get_bandgap()
@@ -66,11 +68,7 @@ RH_RF95 rf95(RFM95_CS, RFM95_INT);
 // TODO Add this: RHReliableDatagram manager(rf95, SENSOR_ID);
 
 SdFat sd;
-SdFile myFile;
-
-#if STEMMA
-Adafruit_seesaw soil_moisture;
-#endif
+SdFile data_file;
 
 ///
 /// General functions
@@ -310,33 +308,27 @@ void clock_setup(bool blink_status)
         new_blink_times(STATUS, CLOCK_STATUS, COMPLETED);
 }
 
-// Send basic information about the sensor plus the information in time_stamp, etc.
-// Wait for a response and record the SNR and RSSI of the response (used in the
-// next send_packet() transmission).
-//
-// TODO use snprintf()
-//
-// Packet sent: Time, sensor ID, packet num, sensor battery volts, clock temp, clock battery volts, 
-//              rssi of last ack, snr of last ack, soil temp, soil moisture
+// rssi and snr are read from the ACK received in send_packet().
+// The values are sent as part of the next packet
+static int16_t rssi = 0;
+static int32_t snr = 0;
 
-//send_packet(iso8601_date_time(RTC.now()), (uint16_t) (RTC.getTemp() * 100), v_bat,
-//        get_tmp36_temp(v_bat), get_moisture_raw(v_bat));
-
-void send_packet(char *time_stamp, uint16_t clock_temp, uint16_t sensor_bat_volts,
-                 int16_t soil_temp, uint16_t soil_moisture) {
+/**
+ * @brief Build the data payload
+ * A wordy but easy to decode packet of data.
+ * @todo use snprintf
+ * @param time_stamp ISO data/time string
+ * @param clock_temp Temperature of the DS3231 clock.
+ * @param sensor_bat_voltage Voltage of the sensor's battery
+ * @param soil_temp Soil temperature, measured from the TMP36
+ * @param soil_moisture Soil moisture, measured using a simple resistive device
+ * @return Pointer to the formatted data buffer, null terminated.
+ */
+char *build_packet(char *time_stamp, int16_t clock_temp, uint16_t sensor_bat_volts,
+                  int16_t soil_temp, uint16_t soil_moisture) {
     static uint32_t packetnum = 0;  // packet counter, we increment per xmission
-    static int16_t rssi = 0;        // rssi and snr are read from the ACK received and sent as part of the next packaet
-    static int32_t snr = 0;
 
-    digitalWrite(RFM95_CS, LOW);
-    digitalWrite(SD_CS,HIGH);
-    SPI.begin();
-
-    lora_setup(false);
-
-    IO(Serial.println(F("Sending to rf95_server")));
-
-    char packet[64];
+    static char packet[MAX_PACKET_SIZE];
 
     // Send a message to rf95_server
     // The RSSI and SNR are for the most recent ACK received from the server in response to
@@ -371,7 +363,23 @@ void send_packet(char *time_stamp, uint16_t clock_temp, uint16_t sensor_bat_volt
 
     strncat(packet, itoa(soil_moisture, val, 10), sizeof(packet) - 1);
 
-    rf95.send((uint8_t *) packet, strnlen(packet, sizeof(packet)) + 1);
+    return packet;
+}
+
+/**
+ * @brief Send the data packet to the master node using LoRa
+ * @param packet Formatted char data, null terminated
+ */
+void send_packet(const char packet[]) {
+    // LoRa on the bus.
+    digitalWrite(RFM95_CS, LOW);
+    SPI.begin();
+
+    lora_setup(false);
+
+    IO(Serial.println(F("Sending to rf95_server")));
+
+    rf95.send((uint8_t *) packet, strnlen(packet, MAX_PACKET_SIZE));
 
     // Now wait for a reply
     IO(Serial.println(F("Waiting for packet to complete...")));
@@ -385,7 +393,8 @@ void send_packet(char *time_stamp, uint16_t clock_temp, uint16_t sensor_bat_volt
     if (rf95.waitAvailableTimeout(RF95_TIMEOUT)) {
         // Should be a reply message for us now
         if (rf95.recv(buf, &len)) {
-            // Update rssi and snr
+            // Update rssi and snr. These are global variables defined above.
+            // See build_packet().
             rssi = rf95.lastRssi();
             snr = rf95.lastSNR();
 
@@ -408,8 +417,34 @@ void send_packet(char *time_stamp, uint16_t clock_temp, uint16_t sensor_bat_volt
         IO(Serial.flush());
     }
 
+    // Take the LoRa off the SPI bus
     digitalWrite(RFM95_CS, HIGH);
     SPI.end();
+}
+
+/**
+ * @brief Write data to the SD card
+ * @param packet Formatted char data, null terminated
+ */
+void write_packet(const char packet[])
+{
+    // Initialize SdFat or print a detailed error message and halt
+    // Use half speed like the native library.
+    // change to SPI_FULL_SPEED for more performance.
+
+    digitalWrite(SD_CS, LOW);
+    SPI.begin();
+
+    if (!sd.begin(SD_CS, SPI_HALF_SPEED))
+        sd.initErrorHalt();
+
+    if (data_file.open("data.txt", O_WRONLY)) {
+        // write stuff
+        data_file.close();
+    }
+
+    SPI.end();
+    digitalWrite(SD_CS, HIGH);
 }
 
 /**
@@ -439,15 +474,8 @@ void set_alarm(int minutes, int seconds) {
     RTC.armAlarm(1, true);
     RTC.alarmInterrupt(1, true);
 
-    IO(Serial.println(F("After reconfiguration")));
     IO(Serial.print(F("Alarm 1: ")));
     IO(Serial.println(RTC.isArmed(1)));
-    IO(Serial.print(F("Alarm 2: ")));
-    IO(Serial.println(RTC.isArmed(2)));
-    IO(Serial.print(F("RTC Status: ")));
-    IO(Serial.println(RTC.readSqwPinMode(), HEX));
-    IO(Serial.print(F("RTC 32kHz: ")));
-    IO(Serial.println(RTC.getEN32kHz()));
     IO(Serial.flush());
 }
 
@@ -507,6 +535,9 @@ void setup() {
     Serial.println(F("boot"));
 #endif
 
+    // Power on the DS3231 clock, LoRa and SD card
+    digitalWrite(DEVICE_POWER, HIGH);
+
     if (!RTC.begin()) {
         IO(Serial.println(F("Couldn't find RTC")));
         error_blink_times(STATUS, CLOCK_STATUS + 1);
@@ -537,10 +568,9 @@ void setup() {
 
     clock_setup(true);
 
-    digitalWrite(DEVICE_POWER, HIGH);
-
-    // Set these HIGH so the SPI devices will be high impedance.
+    // Set SPI devices HIGH so they will be high impedance.
     digitalWrite(RFM95_CS, HIGH);
+    // SD card off the SPI bus
     digitalWrite(SD_CS,HIGH);
 }
 
@@ -551,15 +581,19 @@ void loop() {
 
     IO(Serial.print(F("Battery: ")));
     IO(Serial.println(v_bat));
-    IO(Serial.flush());
 
     IO(Serial.print(F("Time: ")));
     IO(Serial.println(iso8601_date_time(RTC.now())));
     IO(Serial.flush());
 
+    const char *packet = build_packet(iso8601_date_time(RTC.now()), (int16_t) (RTC.getTemp() * 100),
+            v_bat, get_tmp36_temp(v_bat), get_moisture_raw(v_bat));
+
 #if LORA
-    send_packet(iso8601_date_time(RTC.now()), (uint16_t) (RTC.getTemp() * 100), v_bat,
-            get_tmp36_temp(v_bat), get_moisture_raw(v_bat));
+    send_packet(packet);
+#endif
+#if SD
+    write_packet(packet);
 #endif
 
     new_blink_times(STATUS, SAMPLE_STATUS, COMPLETED);
