@@ -570,6 +570,21 @@ void setup() {
 
     // Set SPI devices HIGH so they will be high impedance.
     digitalWrite(RFM95_CS, HIGH);
+
+    // Probe the SD card once for correctness
+    digitalWrite(SD_CS,LOW);
+    SPI.begin();
+    if (!sd.begin(SD_CS, SPI_HALF_SPEED)) sd.initErrorHalt();
+    if (sd.vol()->fatType() == 0) {
+        IO(Serial.println(F("Can't find a valid FAT16/FAT32 partition.")));
+        sd.initErrorHalt();
+    }
+    uint32_t size = sd.card()->cardSize();
+    IO(Serial.print(F("SD card size: ")));
+    IO(Serial.print(size/(1024*1024)));
+    IO(Serial.println(F("bytes.")));
+    SPI.end();
+
     // SD card off the SPI bus
     digitalWrite(SD_CS,HIGH);
 }
