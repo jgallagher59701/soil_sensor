@@ -580,11 +580,15 @@ void loop() {
 
     new_blink_times(STATUS, SAMPLE_STATUS, COMPLETED);
 
-    //arduino enters sleep mode here
+    // Arduino enters sleep mode here
     set_alarm(-1, 15);
     attachInterrupt(0, wakeUp, LOW);    //use interrupt 0 (pin 2) and run function wakeUp when pin 2 gets LOW
+    // Power save: Turn off the SPI bus (SPI.end())
+    // Also, Radiohead has a sleep() function.
+    // Power save: Maybe turn off the Wire i2c bus
+    // Power save: Set all pins to input, then LOW
     digitalWrite(DEVICE_POWER, LOW);
-    port_setup_sleep();
+    port_setup_sleep(); // Power save: turn off internal pull ups
     LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
 
     // wake up here.
