@@ -49,6 +49,28 @@ Build using the CLion ide or on the command line using:
 * https://www.airspayce.com/mikem/arduino/RadioHead/classRH__RF95.html, 
 * https://www.airspayce.com/mikem/arduino/RadioHead/classRHReliableDatagram.html
 
+## Notes about LoRa and SDFat
+### From: https://github.com/greiman/SdFat/issues/92
+
+You must use [SPI transactions](https://www.arduino.cc/en/Tutorial/SPITransaction) 
+to use SPI in interrupts routines.
+
+With the new SPI library, configure each SPI device once as an SPISettings object.
+Also, if that device will be called from an interrupt, say so with 
+SPI.usingInterrupt(interruptNumber). To communicate with a specific SPI device, 
+use SPI.beginTransaction which automatically uses the settings you declared for 
+that device. In addition, it will disable any interrupts that use SPI for the 
+duration of the transaction. Once you are finished, use SPI.endTransaction()
+which re-enables any SPI-using interrupts.
+
+This will block the radio driver but allow interrupts to occur for millis and 
+drivers that don't use SPI.
+
+Fix the radio driver with [usingInterrupt](https://www.arduino.cc/en/Reference/SPIusingInterrupt)!
+
+Edit:
+[Here](https://github.com/PaulStoffregen/RadioHead) is an example radio driver with a fix. Don't know if it would work in your case.
+
 ## PlatformIO information
 
 https://docs.platformio.org/en/latest/ide/vscode.html#quick-start

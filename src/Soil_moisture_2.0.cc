@@ -46,7 +46,7 @@
 #define SD_CS 7
 
 #define DEVICE_POWER 8
-#define STATUS 9    // The status LED will only be used for errors in production code
+#define STATUS 13 //9    // The status LED will only be used for errors in production code
 
 #define SF_MOISTURE_SENSOR A0
 #define TMP36 A1
@@ -80,7 +80,7 @@ SdFile data_file;
 // values are used only for testing
 #define LORA_STATUS 2
 #define CLOCK_STATUS 3
-#define SOIL_MOISTURE_STATUS 4
+#define SD_STATUS 4
 #define SAMPLE_STATUS 5
 
 #define START 1
@@ -159,12 +159,13 @@ char *iso8601_date_time(DateTime t) {
 // We use an external pullup on port 2
 // A bit value of zero is INPUT, a value of one is output
 void port_setup_wake() {
-    // PORTD Sets the read/write state. Inputs that are set to Read have the pull-up
+    // PORTB/D Sets the read/write state. Inputs that are set to Read have the pull-up
     // resistor disabled. This uses less power in sleep mode.
     PORTD = PORTD | B11111000; // bits 0 - 7 --> pins 0 - 7
     PORTB = PORTB | B00111111; // bits 0 - 5 --> pins 8 - 13
 
-    // TODO SPI Bus?
+    // Set output ports
+    // DDRD = DDRD | B11111100;
     digitalWrite(RFM95_CS, HIGH);
     digitalWrite(SD_CS, HIGH);
 }
@@ -172,7 +173,7 @@ void port_setup_wake() {
 // Configure I/O ports to use less power during sleep.
 // We use and external pullup on the interrupt pin (pin 2).
 void port_setup_sleep() {
-    // PORTD Sets the read/write state. Inputs that are set to Read have the pull-up
+    // PORTB/D Sets the read/write state. Inputs that are set to Read have the pull-up
     // resistor disabled. This uses less power in sleep mode.
     PORTD = PORTD | B00000000; // pins 0 - 7
     PORTB = PORTB | B00000000; // pins 8 - 13
@@ -219,7 +220,8 @@ void port_setup() {
 // If an error is detected, this function does not return.
 void lora_setup(bool blink_status) {
     // LED to show the LORA radio has been configured - turn on once the LORA is setup
-    if (blink_status) new_blink_times(STATUS, LORA_STATUS, START);
+    if (blink_status)
+        new_blink_times(STATUS, LORA_STATUS, START);
 
     // LORA manual reset
     digitalWrite(RFM95_RST, LOW);
@@ -231,13 +233,15 @@ void lora_setup(bool blink_status) {
     // Sf = 128chips/symbol, CRC on.
     if (!rf95.init()) {
         IO(Serial.println(F("LoRa radio init failed")));
-        //error_blink_times(STATUS, LORA_STATUS + 1);
+        // TODO Write error info to a log
+        error_blink_times(STATUS, LORA_STATUS + 1);
     }
 
     // Defaults after init are 434.0MHz, modulation GFSK_Rb250Fd250, +13dbM.
     // If frequency set fails, blink at 2Hz forever.
     if (!rf95.setFrequency(RF95_FREQ)) {
         IO(Serial.println(F("setFrequency failed")));
+        // TODO Write error info to a log
         error_blink_times(STATUS, LORA_STATUS + 2);
     }
 
@@ -259,7 +263,8 @@ void lora_setup(bool blink_status) {
 
     // LORA setup success, status on.
     IO(Serial.println(F("LoRa radio init OK!")));
-    if (blink_status) new_blink_times(STATUS, LORA_STATUS, COMPLETED);
+    if (blink_status)
+        new_blink_times(STATUS, LORA_STATUS, COMPLETED);
 }
 
 // Can be called both when the clock is first powered and when it's been running
@@ -435,12 +440,13 @@ void write_packet(const char packet[])
     digitalWrite(SD_CS, LOW);
     SPI.begin();
 
-    if (!sd.begin(SD_CS, SPI_HALF_SPEED))
-        sd.initErrorHalt();
-
-    if (data_file.open("data.txt", O_WRONLY)) {
-        // write stuff
-        data_file.close();
+    // setup() tested the SD card - if it fails here, just clean up and leave
+    if (sd.begin(SD_CS, SPI_HALF_SPEED)) {
+        if (data_file.open("data.txt", O_WRONLY)) {
+            // write stuff
+            data_file.println(packet);
+            data_file.close();
+        }
     }
 
     SPI.end();
@@ -527,6 +533,8 @@ void setup() {
 
     pinMode(STATUS, OUTPUT);  // The LED status indicator
     pinMode(DEVICE_POWER, OUTPUT);
+    pinMode(RFM95_CS, OUTPUT);
+    pinMode(SD_CS, OUTPUT);
 
 #if DEBUG
     // Start the serial port
@@ -568,23 +576,28 @@ void setup() {
 
     clock_setup(true);
 
-    // Set SPI devices HIGH so they will be high impedance.
+    // Set SPI devices' CS HIGH so the devices will be off the bus.
     digitalWrite(RFM95_CS, HIGH);
-
-    // Probe the SD card once for correctness
-    digitalWrite(SD_CS,LOW);
-    SPI.begin();
-    if (!sd.begin(SD_CS, SPI_HALF_SPEED)) sd.initErrorHalt();
+    digitalWrite(SD_CS, HIGH);
+#if SD
+    // Probe the SD card for correctness
+    while (!sd.begin(SD_CS)) { //}, SPI_HALF_SPEED)) {
+        IO(Serial.print(F("Can't initialize SD card: ")));
+        IO(Serial.println(sd.cardErrorCode(), HEX));
+        // TODO: Failure here should halt
+        // error_blink_times(STATUS, SD_STATUS + 1);
+    }
     if (sd.vol()->fatType() == 0) {
         IO(Serial.println(F("Can't find a valid FAT16/FAT32 partition.")));
         sd.initErrorHalt();
+        error_blink_times(STATUS, SD_STATUS + 1);
     }
     uint32_t size = sd.card()->cardSize();
     IO(Serial.print(F("SD card size: ")));
-    IO(Serial.print(size/(1024*1024)));
-    IO(Serial.println(F("bytes.")));
+    IO(Serial.print(size / 1024));
+    IO(Serial.println(F(" KB.")));
     SPI.end();
-
+#endif
     // SD card off the SPI bus
     digitalWrite(SD_CS,HIGH);
 }
