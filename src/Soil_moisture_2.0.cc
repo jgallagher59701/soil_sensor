@@ -4,10 +4,10 @@
  * To test this with the echoing LoRa receiver code, use
  * 'ssh root@10.130.1.1 "telnet localhost 6571"'
  * This will ssh to the dragino as root (pw 'dragino') and then
- * run telnet to localhost on port 6571. teh Dragino uses that
+ * run telnet to localhost on port 6571. the Dragino uses that
  * port as a gateway between code running in the Yun (linux) and
  * arduino (which is running the 'echoing' sketch and is connected 
- * to the LoRa,
+ * to the LoRa).
  * 
  * James Gallagher <jgallagher@opendap.org>
  * 10/21/19
@@ -27,8 +27,8 @@
 #include "blink.h"
 
 #define LORA 1
-#define SD 1
-#define SLEEP 1
+#define SD 0
+#define SLEEP 0
 #define DEBUG 1
 #define DEBUG2 0
 
@@ -46,7 +46,7 @@
 #define SD_CS 7
 
 #define DEVICE_POWER 8
-#define STATUS 13 //9    // The status LED will only be used for errors in production code
+#define STATUS 9    // The status LED will only be used for errors in production code
 
 #define SF_MOISTURE_SENSOR A0
 #define TMP36 A1
@@ -54,6 +54,8 @@
 #define RF95_TIMEOUT 4000
 #define RF95_FREQ 915.0
 #define MAX_PACKET_SIZE 64
+#define RF95_CR 5
+#define RF95_SF 7
 
 #define SENSOR_ID 1   // Each slave sensor must have a unique ID
 #define AREF_VOLTAGE_X1000 1080L    // Used to get battery voltage in get_bandgap()
@@ -63,12 +65,16 @@
 // Singleton real time clock
 RTC_DS3231 RTC;
 
+#if LORA
 RH_RF95 rf95(RFM95_CS, RFM95_INT);
 // Class to manage message delivery and receipt, using the driver declared above
 // TODO Add this: RHReliableDatagram manager(rf95, SENSOR_ID);
+#endif
 
+#if SD
 SdFat sd;
 SdFile data_file;
+#endif
 
 ///
 /// General functions
@@ -127,7 +133,7 @@ uint16_t get_bandgap()   // Returns actual value of Vcc (x 100)
 // an ISO 8601 print representation of the object.
 
 char *iso8601_date_time(DateTime t) {
-    static char date_time_str[32];
+    static char date_time_str[32];  // 20 will do
 
     char val[12];
     date_time_str[0] = '\0';
@@ -219,6 +225,7 @@ void port_setup() {
 // Configure the radio. If an error is detected, blink the status LED.
 // If an error is detected, this function does not return.
 void lora_setup(bool blink_status) {
+#if LORA
     // LED to show the LORA radio has been configured - turn on once the LORA is setup
     if (blink_status)
         new_blink_times(STATUS, LORA_STATUS, START);
@@ -247,14 +254,14 @@ void lora_setup(bool blink_status) {
 
     // None of these return error codes.
     // Setup Spreading Factor (chips/symbol) (n = 6 ~ 12, where Sf=2^n (eg 6 --> 2^6 == 64 chips/sym)
-    rf95.setSpreadingFactor(7);
+    rf95.setSpreadingFactor(RF95_SF);
 
     // Setup BandWidth, option: 7800,10400,15600,20800,31200,41700,62500,125000,250000,500000
     // Higher == higher data rates
     rf95.setSignalBandwidth(125000);
 
     // Setup Coding Rate:5(4/5),6(4/6),7(4/7),8(4/8) (higher == better error correction)
-    rf95.setCodingRate4(5);
+    rf95.setCodingRate4(RF95_CR);
 
     // The default transmitter power is 13dBm, using PA_BOOST.
     // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then
@@ -265,6 +272,7 @@ void lora_setup(bool blink_status) {
     IO(Serial.println(F("LoRa radio init OK!")));
     if (blink_status)
         new_blink_times(STATUS, LORA_STATUS, COMPLETED);
+#endif
 }
 
 // Can be called both when the clock is first powered and when it's been running
@@ -376,9 +384,12 @@ char *build_packet(char *time_stamp, int16_t clock_temp, uint16_t sensor_bat_vol
  * @param packet Formatted char data, null terminated
  */
 void send_packet(const char packet[]) {
+#if LORA
     // LoRa on the bus.
+#if 0
     digitalWrite(RFM95_CS, LOW);
     SPI.begin();
+#endif
 
     lora_setup(false);
 
@@ -422,9 +433,12 @@ void send_packet(const char packet[]) {
         IO(Serial.flush());
     }
 
+#if 0
     // Take the LoRa off the SPI bus
     digitalWrite(RFM95_CS, HIGH);
     SPI.end();
+#endif
+#endif
 }
 
 /**
@@ -433,13 +447,14 @@ void send_packet(const char packet[]) {
  */
 void write_packet(const char packet[])
 {
+#if SD
     // Initialize SdFat or print a detailed error message and halt
     // Use half speed like the native library.
     // change to SPI_FULL_SPEED for more performance.
-
+#if 0
     digitalWrite(SD_CS, LOW);
     SPI.begin();
-
+#endif
     // setup() tested the SD card - if it fails here, just clean up and leave
     if (sd.begin(SD_CS, SPI_HALF_SPEED)) {
         if (data_file.open("data.txt", O_WRONLY)) {
@@ -448,9 +463,11 @@ void write_packet(const char packet[])
             data_file.close();
         }
     }
-
+#if 0
     SPI.end();
     digitalWrite(SD_CS, HIGH);
+#endif
+#endif
 }
 
 /**
@@ -509,11 +526,11 @@ int16_t get_tmp36_temp(uint16_t v_bat) {
     (analogRead(TMP36) * ((v_bat * 10)/1024.0)) - ZERO_CROSSING
 #endif
 
-    return (int16_t) ((analogRead(TMP36) / 1023.0) * (v_bat * 10)) - ZERO_CROSSING;
+    return (int16_t) ((analogRead(TMP36) / 1024.0) * (v_bat * 10)) - ZERO_CROSSING;
 }
 
 uint16_t get_moisture_raw(uint16_t v_bat) {
-    return (uint16_t) (analogRead(SF_MOISTURE_SENSOR) / 1023.0 * v_bat);
+    return (uint16_t) (analogRead(SF_MOISTURE_SENSOR) / 1024.0 * v_bat);
 }
 
 /**
@@ -576,9 +593,11 @@ void setup() {
 
     clock_setup(true);
 
+#if 0
     // Set SPI devices' CS HIGH so the devices will be off the bus.
     digitalWrite(RFM95_CS, HIGH);
     digitalWrite(SD_CS, HIGH);
+#endif
 #if SD
     // Probe the SD card for correctness
     while (!sd.begin(SD_CS)) { //}, SPI_HALF_SPEED)) {
@@ -598,8 +617,10 @@ void setup() {
     IO(Serial.println(F(" KB.")));
     SPI.end();
 #endif
+#if 0
     // SD card off the SPI bus
     digitalWrite(SD_CS,HIGH);
+#endif
 }
 
 void loop() {
@@ -617,12 +638,9 @@ void loop() {
     const char *packet = build_packet(iso8601_date_time(RTC.now()), (int16_t) (RTC.getTemp() * 100),
             v_bat, get_tmp36_temp(v_bat), get_moisture_raw(v_bat));
 
-#if LORA
+    // These functions' bodies are empty if LORA and/or SD are 0
     send_packet(packet);
-#endif
-#if SD
     write_packet(packet);
-#endif
 
     new_blink_times(STATUS, SAMPLE_STATUS, COMPLETED);
 
