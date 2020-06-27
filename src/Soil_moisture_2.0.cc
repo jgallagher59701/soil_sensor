@@ -4,10 +4,10 @@
  * To test this with the echoing LoRa receiver code, use
  * 'ssh root@10.130.1.1 "telnet localhost 6571"'
  * This will ssh to the dragino as root (pw 'dragino') and then
- * run telnet to localhost on port 6571. teh Dragino uses that
+ * run telnet to localhost on port 6571. the Dragino uses that
  * port as a gateway between code running in the Yun (linux) and
  * arduino (which is running the 'echoing' sketch and is connected 
- * to the LoRa,
+ * to the LoRa)
  * 
  * James Gallagher <jgallagher@opendap.org>
  * 10/21/19
@@ -20,6 +20,7 @@
 #include <RTClibExtended.h> // DS3231.h doesn't have TimeSpan, but might use less space
 
 #define LORA 1
+#define SLEEP 0
 
 #include <RH_RF95.h>
 
@@ -37,7 +38,7 @@
 #define RFM95_RST 6
 
 #define WAKE_INT 2 // INT0
-#define DEVICE_POWER 10
+#define DEVICE_POWER 8 // 10
 
 #define CLOCK_BAT_VOLTAGE A0
 #define TMP36 A1
@@ -589,8 +590,9 @@ void loop() {
     // Power save: Set all pins to input, then LOW
     digitalWrite(DEVICE_POWER, LOW);
     port_setup_sleep(); // Power save: turn off internal pull ups
+#if SLEEP
     LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
-
+#endif
     // wake up here.
     digitalWrite(DEVICE_POWER, HIGH);
     port_setup_wake();
