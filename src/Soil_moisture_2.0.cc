@@ -20,7 +20,7 @@
 #include <RTClibExtended.h> // DS3231.h doesn't have TimeSpan, but might use less space
 
 #define LORA 1
-#define SLEEP 0
+#define SLEEP 1
 
 #include <RH_RF95.h>
 
@@ -264,7 +264,7 @@ void lora_setup(bool initial_call) {
     // The default transmitter power is 13dBm, using PA_BOOST.
     // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then
     // you can set transmitter powers from 5 to 23 dBm:
-    rf95.setTxPower(23, false);
+    rf95.setTxPower(13/*, false*/);
 
     // LORA setup success, status on.
     IO(Serial.println(F("LoRa radio init OK!")));
