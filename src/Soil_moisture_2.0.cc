@@ -20,7 +20,7 @@
 #include <RTClibExtended.h> // DS3231.h doesn't have TimeSpan, but might use less space
 
 #define LORA 1
-#define SLEEP 1
+#define SLEEP 0
 
 #include <RH_RF95.h>
 
