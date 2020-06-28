@@ -172,8 +172,10 @@ void port_setup_wake() {
 
     // Set output ports
     // DDRD = DDRD | B11111100;
+#if 0
     digitalWrite(RFM95_CS, HIGH);
     digitalWrite(SD_CS, HIGH);
+#endif
 }
 
 // Configure I/O ports to use less power during sleep.
@@ -266,7 +268,7 @@ void lora_setup(bool blink_status) {
     // The default transmitter power is 13dBm, using PA_BOOST.
     // If you are using RFM95/96/97/98 modules which uses the PA_BOOST transmitter pin, then
     // you can set transmitter powers from 5 to 23 dBm:
-    rf95.setTxPower(23, false);
+    rf95.setTxPower(13/*, false*/);
 
     // LORA setup success, status on.
     IO(Serial.println(F("LoRa radio init OK!")));
@@ -617,7 +619,7 @@ void setup() {
     IO(Serial.println(F(" KB.")));
     SPI.end();
 #endif
-#if 0
+#if 1
     // SD card off the SPI bus
     digitalWrite(SD_CS,HIGH);
 #endif
@@ -657,10 +659,10 @@ void loop() {
     LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
 #else
     digitalWrite(DEVICE_POWER, LOW);
-    port_setup_sleep(); // Power save: turn off internal pull ups
+    // FIXME port_setup_sleep(); // Power save: turn off internal pull ups
 #endif
     // wake up here.
     digitalWrite(DEVICE_POWER, HIGH);
-    port_setup_wake();
+    // FIXME port_setup_wake();
     clock_setup(false);
 }
